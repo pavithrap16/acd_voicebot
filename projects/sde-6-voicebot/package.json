@@ -1,0 +1,22 @@
+{
+  "name": "sde-6-voicebot",
+  "version": "0.1.0",
+  "description": "Academiaai AI Voicebot - SDE 6 Implementation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "demo": "tsx src/demo/chunk-to-transcript.ts"
+  },
+  "dependencies": {
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

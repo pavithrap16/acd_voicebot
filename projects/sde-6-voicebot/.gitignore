@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+*.log
+*.webm
+*.wav
+*.mp3
+*.png
+*.jpg
+.DS_Store

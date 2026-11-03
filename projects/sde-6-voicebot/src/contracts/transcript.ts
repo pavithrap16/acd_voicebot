@@ -179,7 +179,10 @@ export const AudioChunkInputSchema = z.object({
     message: "sample_rate must be 8000, 16000, 44100, or 48000 Hz",
   }),
   channels: z.number().int().min(1).max(2, "channels must be 1 (mono) or 2 (stereo)"),
-  data: z.union([z.string().min(1, "Audio data cannot be empty"), z.instanceof(Uint8Array)]),
+  data: z.union([
+    z.string().min(1, "Audio data cannot be empty"),
+    z.custom<Uint8Array>((val) => val instanceof Uint8Array, "Must be a Uint8Array"),
+  ]),
   is_speech: z.boolean().default(true),
 });
 export type AudioChunkInput = z.infer<typeof AudioChunkInputSchema>;

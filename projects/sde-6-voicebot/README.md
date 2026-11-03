@@ -2,9 +2,11 @@
 
 **Workstream**: W2 — Speech-to-Text  
 **Assigned Student**: Pavithra P (SDE 6, Member 2)  
-**Milestone**: Week 1 (Days 1–7) — Transcript Schemas, Fake Transcriber & Segment Accumulator  
+**Milestones Delivered**: 
+- **Week 1 (Days 1–7)**: Transcript Schemas, Fake Transcriber & Segment Accumulator
+- **Week 2 (Days 8–14)**: Orchestration, Ordering & De-duplication, Retries & Preprocessing  
 **Team Branch**: `team/sde-6-voicebot`  
-**Feature Branch**: `feature/w2-transcript-schemas`  
+**Feature Branch**: `feature/w2-speech-to-text`  
 **Base Repository**: [https://github.com/Yashuudevang/acd_voicebot](https://github.com/Yashuudevang/acd_voicebot)
 
 ---
@@ -13,28 +15,40 @@
 
 This module forms the foundation of the Speech-to-Text (STT) pipeline for SDE 6. It operates strictly in **Mock Mode by default**, requiring zero paid external API keys or credentials.
 
-### Key Capabilities Delivered in Week 1:
+### Key Capabilities Delivered:
+
+#### Week 1 (Foundation & Schemas)
 1. **Contract Definition (`src/contracts/`)**:
    - `TranscriptSegment` and `TranscriptEvent` schemas strictly typed with runtime Zod validation.
-   - Implements the team's unified `EventEnvelope` (`event_id`, `event_type`, `schema_version`, `session_id`, `correlation_id`, `timestamp`, `producer`, `payload`).
-   - Implements the team's standard `ErrorEnvelope` (`code`, `message_safe_for_user`, `retryable`, `correlation_id`, `details_redacted`).
+   - Unified `EventEnvelope` (`event_id`, `event_type`, `schema_version`, `session_id`, `correlation_id`, `timestamp`, `producer`, `payload`).
+   - Standard `ErrorEnvelope` (`code`, `message_safe_for_user`, `retryable`, `correlation_id`, `details_redacted`).
    - Defined once inside `projects/sde-6-voicebot/` to prevent duplicate schema sprawl.
 
-2. **Provider-Neutral Adapter & Deterministic Fake Transcriber (`src/providers/`)**:
-   - `SpeechToTextAdapter`: decoupled contract supporting lifecycle initialization, typed input/output, health checks, cancellation, and timeouts.
-   - `DeterministicFakeTranscriber`: Bitwise-identical output on repeated runs given identical audio inputs; supports interim hypotheses, final segments, silence handling, and fault-injection error envelopes.
+2. **Provider-Neutral Adapter & Fake Transcriber (`src/providers/`)**:
+   - `SpeechToTextAdapter` decoupled interface.
+   - `DeterministicFakeTranscriber`: Bitwise-identical output on repeated runs without external API keys.
 
 3. **Ordered Segment Accumulator (`src/accumulator/`)**:
-   - Automatic chronological sorting by `sequence_number` and `start_time_ms`.
-   - Out-of-order packet reconciliation and duplicate suppression.
-   - Interim-to-final replacement lifecycle (provisional live transcript smoothly replaced by finalized speech).
-   - Rejection of malformed or foreign-session payloads without corrupting internal state.
+   - Chronological sorting by `sequence_number` and `start_time_ms`.
+   - Out-of-order reconciliation and duplicate suppression.
+   - Interim-to-final replacement lifecycle.
 
-4. **Synthetic Test Fixtures (`src/fixtures/`)**:
-   - Deterministic 16kHz mono audio chunks, multi-turn utterances, silence chunks, and fault-injection scenarios.
+#### Week 2 (Core Implementation & Orchestration)
+4. **Audio Preprocessor (`src/preprocessing/`)**:
+   - Resampling: Converts 8000Hz, 44100Hz, and 48000Hz audio to standardized 16000Hz.
+   - Amplitude Normalization: Scales audio to optimal target peak (0.95) and eliminates clipping.
+   - DC Offset Removal: Subtracts signal bias.
+   - Stereo to Mono Downmixing: Averages 2-channel audio into a clean single channel.
 
-5. **Live Mock Mode Demo (`src/demo/chunk-to-transcript.ts`)**:
-   - Runnable CLI demonstrating the chunk-to-transcript pipeline from start to finish.
+5. **Resilience, Timeout & Bounded Retries (`src/resilience/`)**:
+   - `RetryHandler`: Configurable `maxRetries`, `timeoutMs`, and exponential backoff with jitter.
+   - Safe error normalization: Maps all exceptions into user-safe `ErrorEnvelope`s without leaking stack traces or credentials.
+
+6. **Transcription Orchestrator (`src/orchestrator/`)**:
+   - Connects: Audio Chunk (W1) ➔ Preprocessing ➔ Timeout/Retry Layer ➔ Provider Adapter ➔ Segment Accumulator.
+   - Chunk-level duplicate suppression.
+   - Live stream event broadcasting (`transcript.interim`, `transcript.final`, `transcript.error`).
+   - Observability metrics tracking (chunks received, duplicates suppressed, retries, errors).
 
 ---
 
@@ -59,18 +73,34 @@ projects/sde-6-voicebot/
 │   ├── accumulator/
 │   │   ├── segment-accumulator.ts # Ordered segment accumulator & interim/final reconciliation
 │   │   └── index.ts
+│   ├── preprocessing/
+│   │   ├── audio-preprocessor.ts  # Resampling (48k/8k -> 16k), Normalization, Downmixing
+│   │   └── index.ts
+│   ├── resilience/
+│   │   ├── retry-handler.ts       # Bounded retries, timeouts, and error normalizer
+│   │   └── index.ts
+│   ├── orchestrator/
+│   │   ├── transcription-orchestrator.ts # Core pipeline coordinator & metrics
+│   │   └── index.ts
 │   ├── fixtures/
 │   │   └── transcript-fixtures.ts # Repeatable synthetic audio and edge case fixtures
 │   ├── demo/
-│   │   └── chunk-to-transcript.ts # Day 7 live executable CLI demonstration
+│   │   ├── chunk-to-transcript.ts       # Week 1 live demo
+│   │   └── week2-orchestrator-demo.ts   # Week 2 live demo
 │   └── index.ts                   # Unified library entry point
 └── tests/
     ├── contracts/
-    │   └── transcript-schemas.test.ts  # 12 unit tests verifying schema constraints & error envelopes
+    │   └── transcript-schemas.test.ts        # 12 tests: schema validation, boundaries, invalid rejection
     ├── providers/
-    │   └── fake-transcriber.test.ts    # 9 unit tests verifying determinism, interim/final, & cancellation
-    └── accumulator/
-        └── segment-accumulator.test.ts # 8 unit tests verifying ordering, de-duplication, & errors
+    │   └── fake-transcriber.test.ts          # 9 tests: determinism, interim/final emission, cancellation
+    ├── accumulator/
+    │   └── segment-accumulator.test.ts       # 8 tests: ordering, duplicate suppression, session boundary
+    ├── preprocessing/
+    │   └── audio-preprocessor.test.ts        # 5 tests: resampling (48k/8k), normalization, stereo downmix
+    ├── resilience/
+    │   └── retry-handler.test.ts             # 4 tests: timeouts, bounded retries, error normalization
+    └── orchestrator/
+        └── transcription-orchestrator.test.ts# 4 tests: end-to-end orchestration, duplicates, errors
 ```
 
 ---
@@ -83,64 +113,51 @@ cd projects/sde-6-voicebot
 npm install
 ```
 
-### Run All Unit and Contract Tests
+### Typecheck (Zero Errors)
+```powershell
+npm run typecheck
+```
+
+### Run All 42 Tests
 ```powershell
 npm run test
 ```
 
-### Run the Day 7 Live Chunk-to-Transcript Demo
+### Run Week 2 Live Demonstration
 ```powershell
-npm run demo
+npm run demo:week2
 ```
 
 ---
 
-## 4. Week 1 Acceptance Checklist
+## 4. Week 2 Acceptance Checklist
 
 | # | Acceptance Criteria | Status | Evidence / Location |
 |---|---|:---:|---|
-| 1 | Both schemas (`TranscriptSegment`, `TranscriptEvent`) exist, defined once, documented | Passed | `src/contracts/transcript.ts` |
-| 2 | Invalid payloads rejected with clear, user-safe error envelopes | Passed | `tests/contracts/transcript-schemas.test.ts` |
-| 3 | Fake transcriber is deterministic (identical output on repeated runs) | Passed | `src/providers/fake-transcriber.ts`, tested in `fake-transcriber.test.ts` |
-| 4 | Adapter is provider-neutral; zero paid API keys needed | Passed | `src/providers/stt-adapter.ts` |
-| 5 | Accumulator returns segments in order, with edge case handling | Passed | `src/accumulator/segment-accumulator.ts` |
-| 6 | Unit test suite passing 100% | Passed | 29/29 passing tests across 3 test suites |
-| 7 | Work is on a feature branch (`feature/w2-transcript-schemas`) | Passed | Verified with `git branch` |
-| 8 | No secrets, private recordings, or audio files committed | Passed | Enforced via `.gitignore` and sanitized fixtures |
-| 9 | Day 7 demo runnable in mock mode via single command | Passed | `npm run demo` executes cleanly |
+| 1 | Chunk to transcript events works end-to-end in mock mode | Passed | `src/orchestrator/transcription-orchestrator.ts` |
+| 2 | Out-of-order and duplicate segments handled correctly | Passed | `tests/orchestrator/transcription-orchestrator.test.ts` |
+| 3 | Interim results reconcile into final segments | Passed | `src/accumulator/segment-accumulator.ts` |
+| 4 | Timeouts and bounded retries work safely | Passed | `tests/resilience/retry-handler.test.ts` |
+| 5 | Provider errors are normalized (no raw exceptions leak) | Passed | `src/resilience/retry-handler.ts` |
+| 6 | Resampling (48k/8k -> 16k) and Normalization tested | Passed | `tests/preprocessing/audio-preprocessor.test.ts` |
+| 7 | Zero paid API keys needed (runs 100% locally in mock mode) | Passed | `src/providers/fake-transcriber.ts` |
+| 8 | No duplicate schema definitions | Passed | Reuses Week 1 schemas in `src/contracts/` |
+| 9 | 100% test pass rate across all suites | Passed | **42/42 tests passing** |
 
 ---
 
-## 5. Daily Progress Report (Day 7 Summary)
+## 5. Daily Progress Report (Week 2: Days 8–14)
 
-- **Completed work**:
-  - Implemented all Day 1–7 deliverables for W2 Speech-to-Text.
-  - Built strict Zod schemas for `TranscriptSegment`, `TranscriptEvent`, and base `EventEnvelope`/`ErrorEnvelope`.
-  - Created provider-neutral `SpeechToTextAdapter` and `DeterministicFakeTranscriber`.
-  - Created `SegmentAccumulator` with monotonic sorting, duplicate suppression, and interim reconciliation.
-  - Created 29 automated unit tests with 100% pass rate.
-  - Built and verified live CLI demo (`npm run demo`).
-- **Files changed**:
-  - `projects/sde-6-voicebot/src/contracts/common.ts`
-  - `projects/sde-6-voicebot/src/contracts/transcript.ts`
-  - `projects/sde-6-voicebot/src/contracts/index.ts`
-  - `projects/sde-6-voicebot/src/providers/stt-adapter.ts`
-  - `projects/sde-6-voicebot/src/providers/fake-transcriber.ts`
-  - `projects/sde-6-voicebot/src/providers/index.ts`
-  - `projects/sde-6-voicebot/src/accumulator/segment-accumulator.ts`
-  - `projects/sde-6-voicebot/src/accumulator/index.ts`
-  - `projects/sde-6-voicebot/src/fixtures/transcript-fixtures.ts`
-  - `projects/sde-6-voicebot/src/demo/chunk-to-transcript.ts`
-  - `projects/sde-6-voicebot/src/index.ts`
-  - `projects/sde-6-voicebot/tests/contracts/transcript-schemas.test.ts`
-  - `projects/sde-6-voicebot/tests/providers/fake-transcriber.test.ts`
-  - `projects/sde-6-voicebot/tests/accumulator/segment-accumulator.test.ts`
-  - `projects/sde-6-voicebot/package.json`
-  - `projects/sde-6-voicebot/tsconfig.json`
-  - `projects/sde-6-voicebot/vitest.config.ts`
-  - `projects/sde-6-voicebot/.gitignore`
-  - `.gitignore` (root)
-- **Tests run**: `npm run test` -> 3 test files passed, 29 tests passed.
-- **GitHub branch**: `feature/w2-transcript-schemas`
-- **Blockers**: None.
-- **Next steps**: Ready to review and commit to feature branch, open PR into `team/sde-6-voicebot`.
+- **Day 8–9 (Orchestration Foundation)**:
+  - Built `TranscriptionOrchestrator` connecting Audio Chunks to Provider and Accumulator.
+  - Implemented event streaming listeners for interim and final segments.
+- **Day 10–11 (Ordering, De-duplication & Reconciliation)**:
+  - Added chunk-level and segment-level deduplication.
+  - Verified out-of-order chunk arrival reordering via sequence numbers.
+- **Day 12–13 (Timeouts, Retries & Audio Preprocessing)**:
+  - Built `AudioPreprocessor` with linear interpolation resampling (8kHz / 44.1kHz / 48kHz ➔ 16kHz) and peak amplitude normalization.
+  - Implemented `RetryHandler` with exponential backoff and timeout enforcement.
+  - Created error normalizer converting all failures into standard `ErrorEnvelope`.
+- **Day 14 (Contract Tests & PR Demo)**:
+  - Added 13 new unit and contract tests (total 42 tests passing).
+  - Built and verified `src/demo/week2-orchestrator-demo.ts` CLI demo.
